@@ -1,16 +1,15 @@
 #!/bin/bash
 
-#SBATCH --account=a-a06
 #SBATCH --time=00:19:59
 #SBATCH --job-name=llama-8b
-#SBATCH --output=/iopsstor/scratch/cscs/%u/Megatron-LM/logs/slurm/training/%x-%j.out
-#SBATCH --error=/iopsstor/scratch/cscs/%u/Megatron-LM/logs/slurm/training/%x-%j.err
-#SBATCH --nodes=16
+#SBATCH --output=/iopsstor/scratch/cscs/%u/slurm-%j.out
+#SBATCH --error=/iopsstor/scratch/cscs/%u/slurm-%j.out
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=72
+#SBATCH --cpus-per-task=71
 #SBATCH --mem=460000
-#SBATCH --environment=/capstor/store/cscs/swissai/a06/containers/NGC-PyTorch/ngc_pt_jan.toml	# Vanilla 25.01 PyTorch NGC Image 
+##A #SBATCH --environment=/capstor/store/cscs/swissai/a06/containers/NGC-PyTorch/ngc_pt_jan.toml	# Vanilla 25.01 PyTorch NGC Image 
+#SBATCH --environment=/iopsstor/scratch/cscs/%u/ngc_pt_jan.toml
 #SBATCH --signal=SIGUSR2@600	# Send SIGUSR2 600 seconds before hitting the time limit
 #SBATCH --no-requeue	# Prevent Slurm to requeue the job if the execution crashes (e.g. node failure) so we don't loose the logs
 
@@ -29,20 +28,21 @@ CHECKPOINT_STEPS=250
 AUTO_JOB_REQUEUE=false # Set to `true` to continuously submit jobs to Slurm until training is complete. Enable it once you are sure of the cost involved in running this experiment.
 
 #### Debugging ####
-LOG_NCCL=false # Log NCCL_DEBUG=info. Every process will dump the logging into separate files, check `NCCL_DEBUG_FILE`
+#LOG_NCCL=false # Log NCCL_DEBUG=info. Every process will dump the logging into separate files, check `NCCL_DEBUG_FILE`
+LOG_NCCL=true # Log NCCL_DEBUG=info. Every process will dump the logging into separate files, check `NCCL_DEBUG_FILE`
 NSYS_PROFILER=false # Turn on the NSYS profiler. Check the `--profile-*` args available in megatron/training/arguments.py
 MOCK_DATA=false # Set to `true` to use mock data
 ###################
 
 # Megatron source and dataset cache WARNING (!) MUST BE ON IOPSSTOR (!)
 MEGATRON_LM_DIR=/iopsstor/scratch/cscs/$USER/Megatron-LM
-DATASET_CACHE_DIR=/iopsstor/scratch/cscs/$USER/datasets/cache
+DATASET_CACHE_DIR=/iopsstor/scratch/cscs/$USER/datasets/cache.${SLURM_JOB_ID}
 BACKUP_CODEBASE=false # Set to `true` to copy the codebase to the experiment folder and re-use it across runs
 
 # Logging directories & artifacts
 PROJECT_NAME=Megatron-Clariden
 EXP_NAME=llama3-8b-$SLURM_NNODES-nodes
-PROJECT_DIR=$MEGATRON_LM_DIR/logs/Meg-Runs/$PROJECT_NAME
+PROJECT_DIR=$MEGATRON_LM_DIR/logs.${SLURM_JOB_ID}/Meg-Runs/$PROJECT_NAME
 
 #########################################
 
@@ -180,6 +180,12 @@ DATA_ARGS=(
 	--num-dataset-builder-threads 1
 )
 
+echo
+echo "============================================================================================================================"
+echo "SETUP PHASE"
+echo "============================================================================================================================"
+echo
+
 # Set up directories
 mkdir -p $CKPT_DIR
 mkdir -p $PROJECT_DIR
@@ -290,8 +296,16 @@ if [ "$AUTO_JOB_REQUEUE" = true ]; then
 	echo "[$(date)] $(sbatch --dependency=singleton $0)"
 fi
 
+echo
+echo "============================================================================================================================"
+echo "STARTING REAL RUN"
+echo "============================================================================================================================"
+echo
+echo
+echo "Will run this: srun --cpus-per-task $SLURM_CPUS_PER_TASK -lu bash -c RANK=$SLURM_PROCID LOCAL_RANK=$SLURM_LOCALID $CMD_PREFIX $TRAINING_CMD"
 srun --cpus-per-task $SLURM_CPUS_PER_TASK -lu bash -c "RANK=\$SLURM_PROCID LOCAL_RANK=\$SLURM_LOCALID $CMD_PREFIX $TRAINING_CMD"
 
+echo
 echo "END TIME: $(date)"
 
 if [ -f $TRIGGER_DIR/exit ]; then
